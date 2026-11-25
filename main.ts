@@ -1,38 +1,56 @@
-// Entry for make.fun's "Post the Meme, Win the Feed" bounty (program/v1, Node 22,
-// standard library only). The entry is the X post itself: an AI agent made the meme
-// picture (meme.png, rendered procedurally by make-meme.mjs in this repository),
-// it is posted on X from a public account with @_myronera and the entrant's play
-// code in the post's text, and POST.json names that post.
-//
-// This program's only job is to copy POST.json from the repository root to
-// /output/POST.json, where the house's gate reads it. It does no network, reads
-// no clock, and writes the same bytes on every run. It first checks POST.json
-// parses as JSON with a url string, so a broken file fails loudly instead of
-// silently copying garbage.
-//
-// Local run (outside the grader's container):
-//   mkdir -p out && MAKEFUN_BOT_DIR=. MAKEFUN_OUTPUT_DIR=out node main.ts
+// Post the Meme, Win the Feed — entry program.
+// Job: take POST.json from the bot folder and place an identical copy
+// in the output folder. No network, no clock, same bytes every run.
 
-import { copyFileSync, mkdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 
-const BOT_DIR = process.env.MAKEFUN_BOT_DIR ?? '/bot';
-const OUTPUT_DIR = process.env.MAKEFUN_OUTPUT_DIR ?? '/output';
+const botDir = process.env.MAKEFUN_BOT_DIR ?? "/bot";
+const outDir = process.env.MAKEFUN_OUTPUT_DIR ?? "/output";
 
-const src = join(BOT_DIR, 'POST.json');
-const dst = join(OUTPUT_DIR, 'POST.json');
+const sourcePath = join(botDir, "POST.json");
+const targetPath = join(outDir, "POST.json");
 
-// Fail loudly if POST.json is not a JSON object with a url string.
-const parsed: unknown = JSON.parse(readFileSync(src, 'utf8'));
-if (typeof parsed !== 'object' || parsed === null || typeof (parsed as { url?: unknown }).url !== 'string') {
-  console.error('POST.json must be a JSON object with a string "url" field');
-  process.exit(1);
-}
-
-mkdirSync(OUTPUT_DIR, { recursive: true });
+let raw: Buffer;
 try {
-  copyFileSync(src, dst);
+  raw = readFileSync(sourcePath);
 } catch (err) {
-  console.error(`POST.json could not be copied from ${BOT_DIR}: ${(err as Error).message}`);
+  console.error(`cannot read ${sourcePath}: ${(err as Error).message}`);
   process.exit(1);
 }
+
+let parsed: unknown;
+try {
+  parsed = JSON.parse(raw.toString("utf8"));
+} catch (err) {
+  console.error(`POST.json is not valid JSON: ${(err as Error).message}`);
+  process.exit(1);
+}
+
+if (
+  typeof parsed !== "object" ||
+  parsed === null ||
+  Array.isArray(parsed) ||
+  typeof (parsed as { url?: unknown }).url !== "string" ||
+  ((parsed as { url: string }).url.length === 0)
+) {
+  console.error("POST.json must be a JSON object with a non-empty string field 'url'");
+  process.exit(1);
+}
+
+const postUrl = (parsed as { url: string }).url;
+const xPostShape = /^https:\/\/(x\.com|twitter\.com)\/[A-Za-z0-9_]+\/status\/[0-9]+$/;
+if (!xPostShape.test(postUrl)) {
+  console.error(`url is not an X post address (https://x.com/<handle>/status/<digits>): ${postUrl}`);
+  process.exit(1);
+}
+
+mkdirSync(outDir, { recursive: true });
+writeFileSync(targetPath, raw);
+
+const writtenBack = readFileSync(targetPath);
+if (!writtenBack.equals(raw)) {
+  console.error(`verify failed: ${targetPath} differs from ${sourcePath}`);
+  process.exit(1);
+}
+console.log(`copied POST.json to ${targetPath}`);
